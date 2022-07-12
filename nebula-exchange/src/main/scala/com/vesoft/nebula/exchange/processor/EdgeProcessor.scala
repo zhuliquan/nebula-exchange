@@ -7,40 +7,25 @@ package com.vesoft.nebula.exchange.processor
 
 import java.nio.{ByteBuffer, ByteOrder}
 import java.nio.file.{Files, Paths}
-
 import com.google.common.geometry.{S2CellId, S2LatLng}
-import com.vesoft.nebula.client.graph.data.HostAddress
 import com.vesoft.nebula.encoder.NebulaCodecImpl
-import com.vesoft.nebula.exchange.config.{
-  Configs,
-  EdgeConfigEntry,
-  FileBaseSinkConfigEntry,
-  SinkCategory,
-  StreamingDataSourceConfigEntry
-}
+import com.vesoft.nebula.exchange.config.{Configs, EdgeConfigEntry, FileBaseSinkConfigEntry, SinkCategory, StreamingDataSourceConfigEntry}
 import com.vesoft.nebula.exchange.utils.NebulaUtils.DEFAULT_EMPTY_VALUE
 import com.vesoft.nebula.exchange.utils.{HDFSUtils, NebulaUtils}
-import com.vesoft.nebula.exchange.{
-  Edge,
-  Edges,
-  ErrorHandler,
-  GraphProvider,
-  KeyPolicy,
-  MetaProvider,
-  VidType
-}
+import com.vesoft.nebula.exchange.{Edge, Edges, ErrorHandler, GraphProvider, KeyPolicy, MetaProvider, VidType}
 import org.apache.log4j.Logger
 import com.vesoft.nebula.exchange.writer.{NebulaGraphClientWriter, NebulaSSTWriter}
 import org.apache.commons.codec.digest.MurmurHash2
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.{DataFrame, Encoders, Row}
+import org.apache.spark.sql.{DataFrame, Encoders, Row, SparkSession}
 import org.apache.spark.util.LongAccumulator
 
 import scala.collection.JavaConverters._
 import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 
-class EdgeProcessor(data: DataFrame,
+class EdgeProcessor(spark: SparkSession,
+                    data: DataFrame,
                     edgeConfig: EdgeConfigEntry,
                     fieldKeys: List[String],
                     nebulaKeys: List[String],
@@ -120,7 +105,7 @@ class EdgeProcessor(data: DataFrame,
       } else {
         data.dropDuplicates(edgeConfig.sourceField, edgeConfig.targetField)
       }
-      distintData
+      var sstData = distintData
         .mapPartitions { iter =>
           iter.map { row =>
             val srcIndex: Int = row.schema.fieldIndex(edgeConfig.sourceField)
@@ -169,11 +154,6 @@ class EdgeProcessor(data: DataFrame,
               row.get(rankIndex).toString.toLong
             } else {
               0
-            }
-
-            val hostAddrs: ListBuffer[HostAddress] = new ListBuffer[HostAddress]
-            for (addr <- address) {
-              hostAddrs.append(new HostAddress(addr.getHostText, addr.getPort))
             }
 
             val srcPartitionId = NebulaUtils.getPartitionId(srcId, partitionNum, vidType)
@@ -226,6 +206,8 @@ class EdgeProcessor(data: DataFrame,
         .flatMap(line => {
           List((line._1, line._3), (line._2, line._3))
         })(Encoders.tuple(Encoders.BINARY, Encoders.BINARY))
+
+        customRepartition(spark, sstData, partitionNum)
         .toDF("key", "value")
         .sortWithinPartitions("key")
         .foreachPartition { iterator: Iterator[Row] =>

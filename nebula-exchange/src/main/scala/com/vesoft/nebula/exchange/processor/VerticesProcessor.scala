@@ -8,7 +8,6 @@ package com.vesoft.nebula.exchange.processor
 import java.nio.file.{Files, Paths}
 import java.nio.{ByteBuffer, ByteOrder}
 
-import com.vesoft.nebula.client.graph.data.HostAddress
 import com.vesoft.nebula.encoder.NebulaCodecImpl
 import com.vesoft.nebula.exchange.{
   ErrorHandler,
@@ -33,7 +32,7 @@ import org.apache.commons.codec.digest.MurmurHash2
 import org.apache.log4j.Logger
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.streaming.Trigger
-import org.apache.spark.sql.{DataFrame, Encoders, Row}
+import org.apache.spark.sql.{DataFrame, Encoders, Row, SparkSession}
 import org.apache.spark.util.LongAccumulator
 
 import scala.collection.JavaConverters._
@@ -49,7 +48,8 @@ import scala.collection.mutable.{ArrayBuffer, ListBuffer}
   * @param batchSuccess
   * @param batchFailure
   */
-class VerticesProcessor(data: DataFrame,
+class VerticesProcessor(spark: SparkSession,
+                        data: DataFrame,
                         tagConfig: TagConfigEntry,
                         fieldKeys: List[String],
                         nebulaKeys: List[String],
@@ -118,17 +118,16 @@ class VerticesProcessor(data: DataFrame,
       val tagName        = tagConfig.name
       val vidType        = metaProvider.getVidType(space)
 
-      val spaceVidLen = metaProvider.getSpaceVidLen(space)
-      val tagItem     = metaProvider.getTagItem(space, tagName)
+      val spaceVidLen = metaProvider.getSpaceVidLen(space) // vid length
+      val tagItem     = metaProvider.getTagItem(space, tagName) // tag name
 
-      data
-        .dropDuplicates(tagConfig.vertexField)
-        .mapPartitions { iter =>
-          iter.map { row =>
+      var sstData = data
+        .dropDuplicates(tagConfig.vertexField) // 按照 id 去重数据
+        .mapPartitions { iter => iter.map { row =>
             val index: Int = row.schema.fieldIndex(tagConfig.vertexField)
             assert(index >= 0 && !row.isNullAt(index),
                    s"vertexId must exist and cannot be null, your row data is $row")
-            var vertexId: String = row.get(index).toString
+            var vertexId: String = row.get(index).toString // 获取vid
             if (vertexId.equals(DEFAULT_EMPTY_VALUE)) {
               vertexId = ""
             }
@@ -144,11 +143,6 @@ class VerticesProcessor(data: DataFrame,
                   throw new IllegalArgumentException(
                     s"policy ${tagConfig.vertexPolicy.get} is invalidate")
               }
-            }
-
-            val hostAddrs: ListBuffer[HostAddress] = new ListBuffer[HostAddress]
-            for (addr <- address) {
-              hostAddrs.append(new HostAddress(addr.getHostText, addr.getPort))
             }
 
             val partitionId = NebulaUtils.getPartitionId(vertexId, partitionNum, vidType)
@@ -176,6 +170,7 @@ class VerticesProcessor(data: DataFrame,
             (vertexKey, vertexValue)
           }
         }(Encoders.tuple(Encoders.BINARY, Encoders.BINARY))
+        customRepartition(spark, sstData, partitionNum)
         .toDF("key", "value")
         .sortWithinPartitions("key")
         .foreachPartition { iterator: Iterator[Row] =>

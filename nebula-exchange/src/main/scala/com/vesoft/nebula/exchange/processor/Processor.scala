@@ -18,10 +18,12 @@ import com.vesoft.nebula.{
   Polygon
 }
 import com.vesoft.nebula.exchange.utils.NebulaUtils.DEFAULT_EMPTY_VALUE
-import com.vesoft.nebula.exchange.utils.{HDFSUtils, NebulaUtils}
+import com.vesoft.nebula.exchange.utils.{HDFSUtils, NebulaUtils, NebulaPartitioner}
 import com.vesoft.nebula.meta.PropertyType
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{IntegerType, LongType, StringType}
+import org.apache.spark.sql.{DataFrame, Dataset, Encoders, SparkSession}
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable.ListBuffer
 
@@ -229,4 +231,23 @@ trait Processor extends Serializable {
       }
     }
   }
+  def printChoice(streamFlag: Boolean, context: String): Unit = {
+    if (streamFlag) LOG.warn(context)
+    else assert(assertion = false, context)
+  }
+
+  def customRepartition(spark: SparkSession,
+                        data: Dataset[(Array[Byte], Array[Byte])],
+                        partitionNum: Int): Dataset[(Array[Byte], Array[Byte])] = {
+    import spark.implicits._
+    data.rdd
+      .partitionBy(new NebulaPartitioner(partitionNum))
+      .map(kv => SSTData(kv._1, kv._2))
+      .toDF()
+      .map { row =>
+        (row.getAs[Array[Byte]](0), row.getAs[Array[Byte]](1))
+      }(Encoders.tuple(Encoders.BINARY, Encoders.BINARY))
+  }
 }
+
+case class SSTData(key: Array[Byte], value: Array[Byte])

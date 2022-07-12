@@ -140,6 +140,7 @@ object Exchange {
             spark.sparkContext.longAccumulator(s"batchFailure.${tagConfig.name}")
 
           val processor = new VerticesProcessor(
+            spark,
             repartition(data.get, tagConfig.partition, tagConfig.dataSourceConfigEntry.category),
             tagConfig,
             fieldKeys,
@@ -179,6 +180,7 @@ object Exchange {
           val batchFailure = spark.sparkContext.longAccumulator(s"batchFailure.${edgeConfig.name}")
 
           val processor = new EdgeProcessor(
+            spark,
             repartition(data.get, edgeConfig.partition, edgeConfig.dataSourceConfigEntry.category),
             edgeConfig,
             fieldKeys,
