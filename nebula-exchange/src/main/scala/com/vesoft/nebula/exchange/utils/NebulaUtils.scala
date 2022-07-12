@@ -7,7 +7,6 @@ package com.vesoft.nebula.exchange.utils
 
 import java.nio.charset.Charset
 
-import com.google.common.primitives.UnsignedLong
 import com.vesoft.nebula.exchange.{MetaProvider, VidType}
 import com.vesoft.nebula.exchange.config.{SchemaConfigEntry, Type}
 import org.apache.commons.codec.digest.MurmurHash2
