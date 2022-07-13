@@ -90,9 +90,7 @@ object NebulaUtils {
     } else {
       id.toLong
     }
-    val unsignedValue = UnsignedLong.fromLongBits(hashValue)
-    val partSize      = UnsignedLong.fromLongBits(partitionSize)
-    unsignedValue.mod(partSize).intValue + 1
+    UnsignedLong.mod(hashValue, partitionSize.toLong).toInt + 1
   }
 
   def escapePropName(nebulaFields: List[String]): List[String] = {
